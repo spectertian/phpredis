@@ -103,9 +103,34 @@ See [instructions from @char101](https://github.com/nicolasff/phpredis/issues/21
 
 ## Distributed Redis Array
 
-See [dedicated page](https://github.com/nicolasff/phpredis/blob/master/arrays.markdown#readme).
+See [dedicated page](https://github.com/phpredis/phpredis/blob/master/arrays.markdown#readme).
 
+## Redis Cluster support
 
+See [dedicated page](https://github.com/phpredis/phpredis/blob/feature/redis_cluster/cluster.markdown#readme).
+
+## Running the unit tests
+phpredis uses a small custom unit test suite for testing functionality of the various classes.  To run tests, simply do the following:
+
+<pre>
+# Run tests for Redis class (note this is the default)
+php tests/TestRedis.php --class Redis
+
+# Run tests for RedisArray class
+tests/mkring.sh
+php tests/TestRedis.php --class RedisArray
+
+# Run tests for the RedisCluster class
+test/make-cluster.sh start
+php tests/TestRedis.php --class RedisCluster
+</pre>
+
+Note that it is possible to run only tests which match a substring of the test itself by passing the additional argument '--test <str>' when invoking.
+
+<pre>
+# Just run the 'echo' test
+php tests/TestRedis.php --class Redis --test echo 
+</pre>
 
 # Classes and methods
 -----
@@ -169,7 +194,7 @@ _**Description**_: Connects to a Redis instance.
 *host*: string. can be a host, or the path to a unix domain socket  
 *port*: int, optional  
 *timeout*: float, value in seconds (optional, default is 0 meaning unlimited)  
-*reserved*: should be NULL if retry_interval is specified
+*reserved*: should be NULL if retry_interval is specified  
 *retry_interval*: int, value in milliseconds (optional)
 
 ##### *Return value*
@@ -205,7 +230,7 @@ persistent equivalents.
 *host*: string. can be a host, or the path to a unix domain socket  
 *port*: int, optional  
 *timeout*: float, value in seconds (optional, default is 0 meaning unlimited)  
-*persistent_id*: string. identity for the requested persistent connection
+*persistent_id*: string. identity for the requested persistent connection  
 *retry_interval*: int, value in milliseconds (optional)
 
 ##### *Return value*
@@ -2488,6 +2513,7 @@ while(($arr_mems = $redis->sscan('set', $it, "*pattern*"))!==FALSE) {
 * [zInter](#zinter) - Intersect multiple sorted sets and store the resulting sorted set in a new key
 * [zRange](#zrange) - Return a range of members in a sorted set, by index
 * [zRangeByScore, zRevRangeByScore](#zrangebyscore-zrevrangebyscore) - Return a range of members in a sorted set, by score
+* [zRangeByLex](#zrangebylex) - Return a lexigraphical range from members that share the same score
 * [zRank, zRevRank](#zrank-zrevrank) - Determine the index of a member in a sorted set
 * [zRem, zDelete](#zrem-zdelete) - Remove one or more members from a sorted set
 * [zRemRangeByRank, zDeleteRangeByRank](#zremrangebyrank-zdeleterangebyrank) - Remove all members in a sorted set within the given indexes
@@ -2669,6 +2695,30 @@ $redis->zRangeByScore('key', 0, 3); /* array('val0', 'val2') */
 $redis->zRangeByScore('key', 0, 3, array('withscores' => TRUE); /* array('val0' => 0, 'val2' => 2) */
 $redis->zRangeByScore('key', 0, 3, array('limit' => array(1, 1)); /* array('val2') */
 $redis->zRangeByScore('key', 0, 3, array('withscores' => TRUE, 'limit' => array(1, 1)); /* array('val2' => 2) */
+~~~
+
+### zRangeByLex
+-----
+_**Description**_:  Returns a lexigraphical range of members in a sorted set, assuming the members have the same score.  The min and max values are required to start with '(' (exclusive), '[' (inclusive), or be exactly the values '-' (negative inf) or '+' (positive inf).  The command must be called with either three *or* five arguments or will return FALSE.
+
+##### *Parameters*
+*key*: The ZSET you wish to run against
+*min*: The minimum alphanumeric value you wish to get
+*max*: The maximum alphanumeric value you wish to get
+*offset*:  Optional argument if you wish to start somewhere other than the first element.
+*limit*: Optional argument if you wish to limit the number of elements returned.
+
+##### *Return value*
+*Array* containing the values in the specified range.
+
+##### *Example*
+~~~
+foreach(Array('a','b','c','d','e','f','g') as $c)
+    $redis->zAdd('key',0,$c);
+
+$redis->zRangeByLex('key','-','[c') /* Array('a','b','c'); */
+$redis->zRangeByLex('key','-','(c') /* Array('a','b') */
+$redis->zRangeByLex('key','-','[c',1,2) /* Array('b','c') */
 ~~~
 
 ### zRank, zRevRank
@@ -2873,7 +2923,7 @@ _**Description**_: Subscribe to channels by pattern
 ##### *Parameters*
 *patterns*: An array of patterns to match
 *callback*: Either a string or an array with an object and method.  The callback will get four arguments ($redis, $pattern, $channel, $message)
-
+*return value*: Mixed.  Any non-null return value in the callback will be returned to the caller.
 ##### *Example*
 ~~~
 function psubscribe($redis, $pattern, $chan, $msg) {
@@ -2903,7 +2953,7 @@ _**Description**_: Subscribe to channels. Warning: this function will probably c
 ##### *Parameters*
 *channels*: an array of channels to subscribe to  
 *callback*: either a string or an array($instance, 'method_name'). The callback function receives 3 parameters: the redis instance, the channel name, and the message.  
-
+*return value*:  Mixed.  Any non-null return value in the callback will be returned to the caller.
 ##### *Example*
 ~~~
 function f($redis, $chan, $msg) {
@@ -2986,11 +3036,11 @@ _**Description**_: Watches a key for modifications by another client.
 If the key is modified between `WATCH` and `EXEC`, the MULTI/EXEC transaction will fail (return `FALSE`). `unwatch` cancels all the watching of all keys by this client.
 
 ##### *Parameters*
-*keys*: a list of keys
+*keys*: string for one key or array for a list of keys
 
 ##### *Example*
 ~~~
-$redis->watch('x');
+$redis->watch('x'); // or for a list of keys: $redis->watch(array('x','another key'));
 /* long code here during the execution of which other clients could well modify `x` */
 $ret = $redis->multi()
     ->incr('x')
@@ -3004,14 +3054,14 @@ $ret = FALSE if x has been modified between the call to WATCH and the call to EX
 
 ## Scripting
 
-* [eval](#) - Evaluate a LUA script serverside
-* [evalSha](#) - Evaluate a LUA script serverside, from the SHA1 hash of the script instead of the script itself
-* [script](#) - Execute the Redis SCRIPT command to perform various operations on the scripting subsystem
-* [getLastError](#) - The last error message (if any)
-* [clearLastError](#) - Clear the last error message
-* [_prefix](#) - A utility method to prefix the value with the prefix setting for phpredis
-* [_unserialize](#) - A utility method to unserialize data with whatever serializer is set up
-* [_serialize](#) - A utility method to serialize data with whatever serializer is set up
+* [eval](#eval) - Evaluate a LUA script serverside
+* [evalSha](#evalsha) - Evaluate a LUA script serverside, from the SHA1 hash of the script instead of the script itself
+* [script](#script) - Execute the Redis SCRIPT command to perform various operations on the scripting subsystem
+* [getLastError](#getlasterror) - The last error message (if any)
+* [clearLastError](#clearlasterror) - Clear the last error message
+* [_prefix](#_prefix) - A utility method to prefix the value with the prefix setting for phpredis
+* [_unserialize](#_unserialize) - A utility method to unserialize data with whatever serializer is set up
+* [_serialize](#_serialize) - A utility method to serialize data with whatever serializer is set up
 
 ### eval
 -----
@@ -3036,7 +3086,7 @@ $redis->rpush('mylist','a');
 $redis->rpush('mylist','b');
 $redis->rpush('mylist','c');
 // Nested response:  Array(1,2,3,Array('a','b','c'));
-$redis->eval("return {1,2,3,redis.call('lrange','mylist',0,-1)}}");
+$redis->eval("return {1,2,3,redis.call('lrange','mylist',0,-1)}");
 ~~~
 
 ### evalSha
@@ -3182,6 +3232,7 @@ $redis->_serialize(new stdClass()); // Returns "Object"
 
 $redis->setOption(Redis::OPT_SERIALIZER, Redis::SERIALIZER_PHP);
 $redis->_serialize("foo"); // Returns 's:3:"foo";'
+~~~
 
 ### _unserialize
 -----
@@ -3262,7 +3313,7 @@ _**Description**_:  Get the read timeout specified to phpredis or FALSE if we're
 None  
 
 ##### *Return value*
-*Mixed*  Returns the read timeout (which can be set using setOption and Redis::OPT_READ_TIMOUT) or FALSE if we're not connected
+*Mixed*  Returns the read timeout (which can be set using setOption and Redis::OPT_READ_TIMEOUT) or FALSE if we're not connected
 
 ### GetPersistentID
 -----
